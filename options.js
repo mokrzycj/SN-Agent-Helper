@@ -15,18 +15,31 @@ const formTitle = document.getElementById('form-title');
 const searchInput = document.getElementById('search');
 const themeToggleBtn = document.getElementById('theme-toggle');
 const pasteBehaviorSelect = document.getElementById('paste-behavior');
+const snPasteCheckbox = document.getElementById('enable-sn-paste');
+const snLinksCheckbox = document.getElementById('enable-sn-links');
+const tagSuggestionsContainer = document.getElementById('tag-suggestions');
 
 // --- SETTINGS ---
 function loadSettings() {
-    chrome.storage.local.get(['pasteBehavior'], (result) => {
+    chrome.storage.local.get(['pasteBehavior', 'enableSNPaste', 'enableSNLinks'], (result) => {
         if (result.pasteBehavior) {
             pasteBehaviorSelect.value = result.pasteBehavior;
         }
+        snPasteCheckbox.checked = result.enableSNPaste !== false; // default true
+        snLinksCheckbox.checked = result.enableSNLinks !== false; // default true
     });
 }
 
 pasteBehaviorSelect.addEventListener('change', () => {
     chrome.storage.local.set({ pasteBehavior: pasteBehaviorSelect.value });
+});
+
+snPasteCheckbox.addEventListener('change', () => {
+    chrome.storage.local.set({ enableSNPaste: snPasteCheckbox.checked });
+});
+
+snLinksCheckbox.addEventListener('change', () => {
+    chrome.storage.local.set({ enableSNLinks: snLinksCheckbox.checked });
 });
 
 // Variable helper buttons logic
@@ -400,12 +413,30 @@ function addTag(text) {
     if (tag && !currentTags.includes(tag)) {
         currentTags.push(tag);
         renderTagsInput();
+        if (editingOriginalKey) autoSaveShortcut();
     }
 }
 
 function removeTag(index) {
     currentTags.splice(index, 1);
     renderTagsInput();
+    if (editingOriginalKey) autoSaveShortcut();
+}
+
+function autoSaveShortcut() {
+    const key = editingOriginalKey || shortcutInput.value.trim();
+    const text = replacementInput.value;
+    if (!key) return;
+
+    chrome.storage.local.get(['shortcuts'], (result) => {
+        const shortcuts = result.shortcuts || {};
+        shortcuts[key] = { text: text, tags: [...currentTags] };
+        chrome.storage.local.set({ shortcuts }, () => {
+            allData = shortcuts;
+            renderFilterTags();
+            applyFilters();
+        });
+    });
 }
 
 function renderTagsInput() {
@@ -421,6 +452,23 @@ function renderTagsInput() {
             removeTag(index);
         };
         tagContainer.insertBefore(pill, tagInput);
+    });
+    renderTagSuggestions();
+}
+
+function renderTagSuggestions() {
+    const allTags = extractAllTags();
+    const suggested = allTags.filter(t => !currentTags.includes(t)).slice(0, 10);
+    
+    tagSuggestionsContainer.innerHTML = suggested.length > 0 ? '<div style="font-size: 11px; color: var(--text-muted); width: 100%; margin-bottom: 5px;">Suggested:</div>' : '';
+    
+    suggested.forEach(tag => {
+        const span = document.createElement('span');
+        span.className = 'card-tag';
+        span.style.cursor = 'pointer';
+        span.innerText = `#${tag}`;
+        span.onclick = () => addTag(tag);
+        tagSuggestionsContainer.appendChild(span);
     });
 }
 

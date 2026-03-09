@@ -4,7 +4,7 @@ let SHORTCUTS = {};
 let shortcutsByLastChar = new Map();
 const MAX_LOOKBACK = 30;
 const CURSOR_MARKER = "|";
-const URL_REGEX = /(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g;
+const URL_REGEX = /https?:\/\/[^\s<]+[^<.,:;"')\]\s]/g;
 
 // --- SHORTCUT CACHE & CONFIG ---
 
@@ -17,6 +17,10 @@ function updateShortcutCache() {
             shortcutsByLastChar.set(lastChar, []);
         }
         shortcutsByLastChar.get(lastChar).push({ shortcut, data });
+    }
+    // Sort by length descending to match more specific shortcuts first (e.g., 'trep//' before 'ep//')
+    for (const candidates of shortcutsByLastChar.values()) {
+        candidates.sort((a, b) => b.shortcut.length - a.shortcut.length);
     }
 }
 
@@ -426,42 +430,80 @@ async function replaceText(element, shortcut, replacement) {
 // --- SERVICENOW LINKIFIER ---
 
 function linkifyStream() {
-    const selectors = ['.sn-widget-textblock-body', '.sn-card-component_summary', '.activity-comment', '.activity-work-notes', '.journal-entry-text', '.outputmsg_text'];
-    selectors.forEach(selector => {
-        document.querySelectorAll(selector).forEach(el => {
-            if (el.dataset.linkified === "true" || el.tagName === 'TEXTAREA' || el.isContentEditable) return;
-            
-            const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
-            let textNode;
-            const nodesToReplace = [];
-            while (textNode = walker.nextNode()) {
-                if (URL_REGEX.test(textNode.nodeValue) && !textNode.parentElement.closest('a')) {
-                    nodesToReplace.push(textNode);
+    if (!chrome.runtime?.id) return; // Prevent "Extension context invalidated" error
+
+    chrome.storage.local.get(['enableSNLinks'], (res) => {
+        if (chrome.runtime.lastError) return; // Handle cases where context dies during the call
+        if (res.enableSNLinks === false) return;
+
+        const selectors = ['.sn-widget-textblock-body', '.sn-card-component_summary', '.activity-comment', '.activity-work-notes', '.journal-entry-text', '.outputmsg_text'];
+        selectors.forEach(selector => {
+            document.querySelectorAll(selector).forEach(el => {
+                if (el.dataset.linkified === "true" || el.tagName === 'TEXTAREA' || el.isContentEditable) return;
+                
+                const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
+                let textNode;
+                const nodesToReplace = [];
+                // Use a non-global regex for testing to avoid index side effects
+                const testRegex = new RegExp(URL_REGEX.source);
+                while (textNode = walker.nextNode()) {
+                    if (testRegex.test(textNode.nodeValue) && !textNode.parentElement.closest('a')) {
+                        nodesToReplace.push(textNode);
+                    }
                 }
-            }
-            nodesToReplace.forEach(node => {
-                const fragment = document.createDocumentFragment();
-                let lastIndex = 0;
-                node.nodeValue.replace(URL_REGEX, (url, index) => {
-                    fragment.appendChild(document.createTextNode(node.nodeValue.substring(lastIndex, index)));
-                    const anchor = document.createElement('a');
-                    anchor.href = url;
-                    anchor.target = "_blank";
-                    anchor.rel = "noopener noreferrer";
-                    anchor.textContent = url;
-                    anchor.style.cssText = "color: #278efc !important; text-decoration: underline !important; font-weight: bold;";
-                    fragment.appendChild(anchor);
-                    lastIndex = index + url.length;
+                nodesToReplace.forEach(node => {
+                    const text = node.nodeValue;
+                    const matches = Array.from(text.matchAll(URL_REGEX));
+                    if (matches.length === 0) return;
+
+                    const fragment = document.createDocumentFragment();
+                    let lastIndex = 0;
+
+                    for (const match of matches) {
+                        const url = match[0];
+                        const index = match.index;
+
+                        // Add text before the match
+                        if (index > lastIndex) {
+                            fragment.appendChild(document.createTextNode(text.substring(lastIndex, index)));
+                        }
+
+                        // Add the link
+                        const anchor = document.createElement('a');
+                        anchor.href = url;
+                        anchor.target = "_blank";
+                        anchor.rel = "noopener noreferrer";
+                        anchor.textContent = url;
+                        anchor.style.cssText = "color: #278efc !important; text-decoration: underline !important; font-weight: bold;";
+                        fragment.appendChild(anchor);
+
+                        lastIndex = index + url.length;
+                    }
+
+                    // Add remaining text
+                    if (lastIndex < text.length) {
+                        fragment.appendChild(document.createTextNode(text.substring(lastIndex)));
+                    }
+
+                    if (node.parentNode) {
+                        node.parentNode.replaceChild(fragment, node);
+                    }
                 });
-                //fragment.appendChild(document.createTextNode(node.nodeValue.substring(lastIndex)));
-                if (node.parentNode) node.parentNode.replaceChild(fragment, node);
+                el.dataset.linkified = "true";
             });
-            el.dataset.linkified = "true";
         });
     });
 }
 
 // --- SERVICENOW IMAGE PASTE & CONTEXT ---
+
+let cachedEnableSNPaste = true;
+chrome.storage.local.get(['enableSNPaste'], (res) => {
+    cachedEnableSNPaste = res.enableSNPaste !== false;
+});
+chrome.storage.onChanged.addListener((changes) => {
+    if (changes.enableSNPaste) cachedEnableSNPaste = changes.enableSNPaste.newValue !== false;
+});
 
 function getRecordContext() {
     const params = new URLSearchParams(window.location.search);
@@ -478,6 +520,8 @@ function isSafeRecordPage(context) {
 }
 
 document.addEventListener('paste', (event) => {
+    if (cachedEnableSNPaste === false) return;
+
     const context = getRecordContext();
     if (!isSafeRecordPage(context)) return;
 

@@ -185,15 +185,15 @@
     <div class="input-group">
       <label>Text (use | to set cursor)</label>
       <div id="variable-helpers" style="margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 5px;">
-        <button class="var-btn" data-var="{{date}}" title="Current Date">+ Date</button>
-        <button class="var-btn" data-var="{{time}}" title="Current Time">+ Time</button>
-        <button class="var-btn" data-var="{{clipboard}}" title="Paste Clipboard">+ Clip</button>
-        <button class="var-btn" data-var="{{identity_select}}" title="Choose between available names">+ Select Name</button>
-        <button class="var-btn" data-var="{{caller_name}}" title="ServiceNow Caller (First Name)">+ Caller</button>
-        <button class="var-btn" data-var="{{requested_for}}" title="ServiceNow Requested For (First Name)">+ Req For</button>
-        <button class="var-btn" data-var="{{opened_by}}" title="ServiceNow Opened By (First Name)">+ Opened By</button>
-        <button class="var-btn" data-var="{{ticket_number}}" title="ServiceNow Ticket Number">+ Ticket</button>
-        <button class="var-btn" data-var="{{prompt:Label}}" title="Ask for user input">+ Prompt</button>
+        <button class="var-btn" tabindex="-1" data-var="{{date}}" title="Current Date">+ Date</button>
+        <button class="var-btn" tabindex="-1" data-var="{{time}}" title="Current Time">+ Time</button>
+        <button class="var-btn" tabindex="-1" data-var="{{clipboard}}" title="Paste Clipboard">+ Clip</button>
+        <button class="var-btn" tabindex="-1" data-var="{{identity_select}}" title="Choose between available names">+ Select Name</button>
+        <button class="var-btn" tabindex="-1" data-var="{{caller_name}}" title="ServiceNow Caller (First Name)">+ Caller</button>
+        <button class="var-btn" tabindex="-1" data-var="{{requested_for}}" title="ServiceNow Requested For (First Name)">+ Req For</button>
+        <button class="var-btn" tabindex="-1" data-var="{{opened_by}}" title="ServiceNow Opened By (First Name)">+ Opened By</button>
+        <button class="var-btn" tabindex="-1" data-var="{{ticket_number}}" title="ServiceNow Ticket Number">+ Ticket</button>
+        <button class="var-btn" tabindex="-1" data-var="{{prompt:Label}}" title="Ask for user input">+ Prompt</button>
       </div>
       <textarea id="replacement" placeholder="Dear Customer,\n\nThank you for your message..."></textarea>
       
@@ -218,6 +218,7 @@
       <div class="tag-input-container" id="tag-container">
         <input type="text" id="tag-input" placeholder="add tag...">
       </div>
+      <div id="tag-suggestions" style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 5px;"></div>
     </div>
 
     <button id="save-btn" class="btn btn-primary">Save Shortcut</button>
@@ -225,11 +226,25 @@
     
     <!-- Settings Section -->
     <div class="input-group" style="margin-top: 20px; border-top: 1px solid var(--border-light); padding-top: 20px;">
-      <label>ServiceNow Image Paste</label>
-      <select id="paste-behavior" style="width: 100%; padding: 10px; border-radius: 8px; border: 2px solid var(--input-border); background: var(--input-bg); color: var(--text-main); font-family: inherit;">
-        <option value="modal">Show Preview Modal</option>
-        <option value="auto">Auto-Upload (No Confirmation)</option>
-      </select>
+      <div style="display: flex; flex-direction: column; gap: 15px;">
+        <div>
+          <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; text-transform: none;">
+            <input type="checkbox" id="enable-sn-paste" checked> Enable SN Image Paste
+          </label>
+        </div>
+        <div>
+          <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; text-transform: none;">
+            <input type="checkbox" id="enable-sn-links" checked> Enable SN Link Highlighter
+          </label>
+        </div>
+        <div>
+          <label>SN Paste Behavior</label>
+          <select id="paste-behavior" style="width: 100%; padding: 10px; border-radius: 8px; border: 2px solid var(--input-border); background: var(--input-bg); color: var(--text-main); font-family: inherit; margin-top: 5px;">
+            <option value="modal">Show Preview Modal</option>
+            <option value="auto">Auto-Upload (No Confirmation)</option>
+          </select>
+        </div>
+      </div>
     </div>
 
     <!-- Stats Section -->

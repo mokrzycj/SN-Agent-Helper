@@ -70,7 +70,32 @@ function loadShortcuts() {
         migrateFormatIfNeeded(result.shortcuts || {}, (migratedData) => {
             allData = migratedData;
             renderList(allData);
+            if (typeof renderTagCloud === 'function') renderTagCloud();
         });
+    });
+}
+
+function renderTagCloud() {
+    const tagCloud = document.getElementById('tag-cloud');
+    const tagsSet = new Set();
+    for (const item of Object.values(allData)) {
+        if (item.tags) item.tags.forEach(t => tagsSet.add(t));
+    }
+    
+    const tags = Array.from(tagsSet).sort();
+    tagCloud.innerHTML = '';
+    
+    tags.forEach(tag => {
+        const span = document.createElement('span');
+        span.className = 'tag';
+        span.style.cursor = 'pointer';
+        span.innerText = `#${tag}`;
+        span.onclick = () => {
+            const searchInput = document.getElementById('search');
+            searchInput.value = `#${tag}`;
+            filterList(`#${tag}`);
+        };
+        tagCloud.appendChild(span);
     });
 }
 
