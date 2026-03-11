@@ -163,7 +163,7 @@ async function resolveVariable(varName) {
         if (varName === 'identity_select') {
             const options = [
                 { label: 'Caller', value: findField('caller_id') || findField('u_caller') },
-                { label: 'Requested For', value: findField('requested_for') },
+                { label: 'Requested For', value: findField('requested_for_label') },
                 { label: 'Opened By', value: findField('opened_by') }
             ].filter(opt => opt.value && opt.value.trim().length > 0);
 
@@ -178,7 +178,7 @@ async function resolveVariable(varName) {
             return getFirstName(findField('caller_id') || findField('u_caller') || "User");
         }
         if (varName === 'requested_for') {
-            return getFirstName(findField('requested_for') || "User");
+            return getFirstName(findField('requested_for_label') || "User");
         }
         if (varName === 'opened_by') {
             return getFirstName(findField('opened_by') || "User");
@@ -572,22 +572,47 @@ function createStagedPreview(blob, context) {
     }
 
     const wrapper = document.createElement('div');
+    const URL_ObjectURL = URL.createObjectURL(blob);
     wrapper.style.cssText = "width: 250px; display: flex; flex-direction: column; gap: 8px; border: 1px solid #ccc; padding: 10px; background: white; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);";
 
     wrapper.innerHTML = `
         <div style="font-size: 11px; font-weight: bold; color: #555; text-transform: uppercase;">Attach to: ${context.tableName}</div>
-        <img src="${URL_ObjectURL = URL.createObjectURL(blob)}" style="width: 100%; max-height: 180px; object-fit: contain; border: 1px solid #eee; background: #fafafa;">
+        <img src="${URL_ObjectURL}" style="width: 100%; max-height: 180px; object-fit: contain; border: 1px solid #eee; background: #fafafa;">
         <div style="display: flex; gap: 10px;">
-            <button id="up-btn" style="flex: 2; background: #278efc; color: white; border: none; padding: 8px; cursor: pointer; font-weight: bold; border-radius: 3px;">Upload</button>
-            <button id="del-btn" style="flex: 1; background: #f44336; color: white; border: none; padding: 8px; cursor: pointer; border-radius: 3px;">Discard</button>
+            <button id="up-btn" style="flex: 2; background: #278efc; color: white; border: none; padding: 8px; cursor: pointer; font-weight: bold; border-radius: 3px;" title="Press Enter to Upload">Upload (↵)</button>
+            <button id="del-btn" style="flex: 1; background: #f44336; color: white; border: none; padding: 8px; cursor: pointer; border-radius: 3px;" title="Press Esc to Discard">Discard (Esc)</button>
         </div>
     `;
 
-    wrapper.querySelector('#up-btn').onclick = async () => {
+    const cleanup = () => {
+        window.removeEventListener('keydown', handleKeys);
+        URL.revokeObjectURL(URL_ObjectURL);
+        wrapper.remove();
+        if (tray && !tray.children.length) tray.remove();
+    };
+
+    const handleKeys = (e) => {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            cleanup();
+        } else if (e.key === 'Enter') {
+            // Only trigger if not typing in a textarea/input to avoid accidental uploads
+            const active = document.activeElement;
+            const isTyping = active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT' || active.isContentEditable);
+            if (!isTyping) {
+                e.preventDefault();
+                uploadAction();
+            }
+        }
+    };
+
+    const uploadAction = async () => {
         const btn = wrapper.querySelector('#up-btn');
+        if (btn.disabled) return;
         btn.disabled = true;
         btn.innerText = "Uploading...";
         wrapper.querySelector('#del-btn').style.display = 'none';
+        window.removeEventListener('keydown', handleKeys);
         
         const fileName = `pasted_sn_${Date.now()}.png`;
         const url = `/api/now/attachment/file?table_name=${context.tableName}&table_sys_id=${context.sysId}&file_name=${fileName}`;
@@ -601,15 +626,18 @@ function createStagedPreview(blob, context) {
             });
             if (res.ok) {
                 wrapper.innerHTML = `<b style="color: #4CAF50; text-align: center; display: block;">✅ Successfully Attached</b>`;
-                setTimeout(() => { wrapper.remove(); if (!tray.children.length) tray.remove(); }, 2500);
+                setTimeout(cleanup, 2500);
             } else throw new Error();
         } catch (err) {
             alert("Upload failed. Session might have expired.");
-            wrapper.remove();
+            cleanup();
         }
     };
 
-    wrapper.querySelector('#del-btn').onclick = () => { URL.revokeObjectURL(URL_ObjectURL); wrapper.remove(); if (!tray.children.length) tray.remove(); };
+    wrapper.querySelector('#up-btn').onclick = uploadAction;
+    wrapper.querySelector('#del-btn').onclick = cleanup;
+    
+    window.addEventListener('keydown', handleKeys);
     tray.appendChild(wrapper);
 }
 
