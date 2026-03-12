@@ -107,13 +107,19 @@ function renderList(shortcutsObject) {
     const keys = Object.keys(shortcutsObject);
     emptyState.style.display = keys.length === 0 ? 'block' : 'none';
 
-    keys.sort().forEach(key => {
+    // Sort by usageCount descending, then by key
+    keys.sort((a, b) => {
+        const countA = shortcutsObject[a].usageCount || 0;
+        const countB = shortcutsObject[b].usageCount || 0;
+        if (countB !== countA) return countB - countA;
+        return a.localeCompare(b);
+    }).forEach(key => {
         const item = shortcutsObject[key];
         const li = document.createElement('li');
         li.className = 'shortcut-item';
         li.title = "Click to copy to clipboard";
 
-        let preview = item.text.replace(/\n/g, '↵ ');
+        let preview = (typeof item === 'string' ? item : item.text).replace(/\n/g, '↵ ');
         
         let tagsHtml = '';
         if (item.tags && item.tags.length > 0) {
@@ -130,7 +136,14 @@ function renderList(shortcutsObject) {
         `;
 
         li.addEventListener('click', () => {
-            const textToCopy = item.text.replace(/\|/g, ''); // Strip the cursor marker
+            const rawText = (typeof item === 'string' ? item : item.text);
+            const textToCopy = rawText
+                .replace(/\{\{.*?\}\}/g, '') // Strip all {{variables}}
+                .replace(/\|/g, '')          // Strip the cursor marker
+                .replace(/[ \t]+/g, ' ')      // Collapse multiple spaces/tabs
+                .replace(/\n\s*\n/g, '\n')   // Remove empty lines
+                .trim();                     // Trim start/end
+
             navigator.clipboard.writeText(textToCopy).then(() => {
                 const badge = li.querySelector('.copy-badge');
                 badge.classList.add('visible');

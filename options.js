@@ -17,16 +17,19 @@ const themeToggleBtn = document.getElementById('theme-toggle');
 const pasteBehaviorSelect = document.getElementById('paste-behavior');
 const snPasteCheckbox = document.getElementById('enable-sn-paste');
 const snLinksCheckbox = document.getElementById('enable-sn-links');
-const tagSuggestionsContainer = document.getElementById('tag-suggestions');
+const ghostTextCheckbox = document.getElementById('enable-ghost-text');
+const triggerSymbolInput = document.getElementById('trigger-symbol');
 
 // --- SETTINGS ---
 function loadSettings() {
-    chrome.storage.local.get(['pasteBehavior', 'enableSNPaste', 'enableSNLinks'], (result) => {
+    chrome.storage.local.get(['pasteBehavior', 'enableSNPaste', 'enableSNLinks', 'triggerSymbol', 'enableGhostText'], (result) => {
         if (result.pasteBehavior) {
             pasteBehaviorSelect.value = result.pasteBehavior;
         }
         snPasteCheckbox.checked = result.enableSNPaste !== false; // default true
         snLinksCheckbox.checked = result.enableSNLinks !== false; // default true
+        ghostTextCheckbox.checked = result.enableGhostText !== false; // default true
+        triggerSymbolInput.value = result.triggerSymbol || ';;';
     });
 }
 
@@ -40,6 +43,14 @@ snPasteCheckbox.addEventListener('change', () => {
 
 snLinksCheckbox.addEventListener('change', () => {
     chrome.storage.local.set({ enableSNLinks: snLinksCheckbox.checked });
+});
+
+ghostTextCheckbox.addEventListener('change', () => {
+    chrome.storage.local.set({ enableGhostText: ghostTextCheckbox.checked });
+});
+
+triggerSymbolInput.addEventListener('input', () => {
+    chrome.storage.local.set({ triggerSymbol: triggerSymbolInput.value });
 });
 
 // Variable helper buttons logic
@@ -114,10 +125,14 @@ function migrateFormatIfNeeded(shortcuts, callback) {
     let newShortcuts = {};
     for (let key in shortcuts) {
         if (typeof shortcuts[key] === 'string') {
-            newShortcuts[key] = { text: shortcuts[key], tags: [] };
+            newShortcuts[key] = { text: shortcuts[key], tags: [], usageCount: 0 };
             needsSave = true;
         } else {
             newShortcuts[key] = shortcuts[key];
+            if (newShortcuts[key].usageCount === undefined) {
+                newShortcuts[key].usageCount = 0;
+                needsSave = true;
+            }
         }
     }
     if (needsSave) {
@@ -487,10 +502,10 @@ saveBtn.addEventListener('click', () => {
         tagInput.value = '';
     }
 
-    const newItem = { text: text, tags: [...currentTags] };
-
     chrome.storage.local.get(['shortcuts'], (result) => {
         const shortcuts = result.shortcuts || {};
+        const oldUsageCount = editingOriginalKey && shortcuts[editingOriginalKey] ? (shortcuts[editingOriginalKey].usageCount || 0) : 0;
+        const newItem = { text: text, tags: [...currentTags], usageCount: oldUsageCount };
         
         if (editingOriginalKey && editingOriginalKey !== key) {
             delete shortcuts[editingOriginalKey];

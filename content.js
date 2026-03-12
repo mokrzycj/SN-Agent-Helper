@@ -2,11 +2,53 @@
 
 let SHORTCUTS = {};
 let shortcutsByLastChar = new Map();
+let trieRoot = {}; // For Ghost Text (Type-ahead)
+let triggerSymbol = ';;';
+let enableGhostText = true;
 const MAX_LOOKBACK = 30;
 const CURSOR_MARKER = "|";
 const URL_REGEX = /https?:\/\/[^\s<]+[^<.,:;"')\]\s]/g;
 
+// --- GHOST TEXT STATE ---
+let ghostState = {
+    element: null,
+    activeMatch: null, // { shortcut, fullText }
+    targetElement: null
+};
+
 // --- SHORTCUT CACHE & CONFIG ---
+
+function buildTrie() {
+    trieRoot = {};
+    for (const [shortcut, data] of Object.entries(SHORTCUTS)) {
+        let node = trieRoot;
+        for (const char of shortcut) {
+            if (!node[char]) node[char] = {};
+            node = node[char];
+        }
+        node.$ = (typeof data === 'string' ? data : data.text);
+    }
+}
+
+function findTrieMatch(prefix) {
+    if (!prefix || prefix.length < 2) return null;
+    let node = trieRoot;
+    for (const char of prefix) {
+        if (!node[char]) return null;
+        node = node[char];
+    }
+    // Deep search for the first available terminal node ($)
+    const findFirst = (n, currentPath) => {
+        if (n.$) return { shortcut: prefix + currentPath, text: n.$ };
+        for (const char in n) {
+            if (char === '$') continue;
+            const found = findFirst(n[char], currentPath + char);
+            if (found) return found;
+        }
+        return null;
+    };
+    return findFirst(node, "");
+}
 
 function updateShortcutCache() {
     shortcutsByLastChar = new Map();
@@ -22,19 +64,33 @@ function updateShortcutCache() {
     for (const candidates of shortcutsByLastChar.values()) {
         candidates.sort((a, b) => b.shortcut.length - a.shortcut.length);
     }
+    buildTrie();
 }
 
-chrome.storage.local.get(['shortcuts'], (result) => {
+chrome.storage.local.get(['shortcuts', 'triggerSymbol', 'enableGhostText'], (result) => {
     if (result.shortcuts) {
         SHORTCUTS = result.shortcuts;
         updateShortcutCache();
     }
+    if (result.triggerSymbol) {
+        triggerSymbol = result.triggerSymbol;
+    }
+    enableGhostText = result.enableGhostText !== false;
 });
 
 chrome.storage.onChanged.addListener((changes, namespace) => {
-    if (namespace === 'local' && changes.shortcuts) {
-        SHORTCUTS = changes.shortcuts.newValue || {};
-        updateShortcutCache();
+    if (namespace === 'local') {
+        if (changes.shortcuts) {
+            SHORTCUTS = changes.shortcuts.newValue || {};
+            updateShortcutCache();
+        }
+        if (changes.triggerSymbol) {
+            triggerSymbol = changes.triggerSymbol.newValue || ';;';
+        }
+        if (changes.enableGhostText) {
+            enableGhostText = changes.enableGhostText.newValue !== false;
+            if (!enableGhostText) hideGhost();
+        }
     }
 });
 
@@ -70,6 +126,87 @@ function getTextBeforeCursor(element, maxLength) {
     return "";
 }
 
+// --- GHOST UI ENGINE ---
+
+function getCaretCoordinates(element) {
+    const isTextArea = element.tagName === 'TEXTAREA';
+    const div = document.createElement('div');
+    const style = window.getComputedStyle(element);
+    
+    // Mimic the element's style
+    const properties = [
+        'direction', 'boxSizing', 'width', 'height', 'overflowX', 'overflowY',
+        'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderStyle',
+        'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+        'fontStyle', 'fontVariant', 'fontWeight', 'fontStretch', 'fontSize', 'fontSizeAdjust', 'lineHeight', 'fontFamily',
+        'textAlign', 'textTransform', 'textIndent', 'textDecoration', 'letterSpacing', 'wordSpacing', 'tabSize', 'MozTabSize'
+    ];
+    
+    div.style.position = 'absolute';
+    div.style.visibility = 'hidden';
+    div.style.whiteSpace = 'pre-wrap';
+    div.style.wordBreak = 'break-all';
+    
+    properties.forEach(prop => {
+        div.style[prop] = style[prop];
+    });
+
+    const textBefore = isTextArea ? element.value.substring(0, element.selectionStart) : element.value;
+    div.textContent = textBefore;
+
+    const span = document.createElement('span');
+    span.textContent = element.value.substring(element.selectionStart) || '.';
+    div.appendChild(span);
+
+    document.body.appendChild(div);
+    const rect = element.getBoundingClientRect();
+    const spanRect = span.getBoundingClientRect();
+    const coords = {
+        top: rect.top + (span.offsetTop - element.scrollTop),
+        left: rect.left + (span.offsetLeft - element.scrollLeft)
+    };
+    document.body.removeChild(div);
+    return coords;
+}
+
+function showGhost(target, match, prefix) {
+    if (!ghostState.element) {
+        ghostState.element = document.createElement('div');
+        ghostState.element.id = 'sn-ghost-text';
+        ghostState.element.style.cssText = `
+            position: fixed;
+            pointer-events: none;
+            color: #bbb;
+            font-family: inherit;
+            font-size: inherit;
+            white-space: pre;
+            z-index: 2147483647;
+            background: transparent;
+            line-height: normal;
+        `;
+        document.body.appendChild(ghostState.element);
+    }
+
+    const coords = getCaretCoordinates(target);
+    const suffix = match.shortcut.substring(prefix.length);
+    
+    ghostState.activeMatch = match;
+    ghostState.targetElement = target;
+    ghostState.element.textContent = suffix + " (Tab ⇥)";
+    ghostState.element.style.top = `${coords.top}px`;
+    ghostState.element.style.left = `${coords.left}px`;
+    ghostState.element.style.display = 'block';
+}
+
+function hideGhost() {
+    if (ghostState.element) {
+        ghostState.element.style.display = 'none';
+    }
+    ghostState.activeMatch = null;
+}
+
+// --- EVENT LISTENERS ---
+
 window.addEventListener('input', (event) => {
     let target = event.target;
     if (!target || target.shadowRoot) {
@@ -85,22 +222,68 @@ window.addEventListener('input', (event) => {
     let isValid = isContentEditable || tagName === 'TEXTAREA' || (tagName === 'INPUT' && !ignoredTypes.includes(target.type?.toLowerCase()) && target.type !== 'password');
     if (!isValid) return;
 
-    const isAddition = event.data || (event.inputType && event.inputType.startsWith('insert'));
-    if (isAddition) {
-        const text = getTextBeforeCursor(target, MAX_LOOKBACK);
-        if (text.length === 0) return;
+    const text = getTextBeforeCursor(target, MAX_LOOKBACK);
+    if (text.length === 0) {
+        hideGhost();
+        return;
+    }
 
-        const candidates = shortcutsByLastChar.get(text.slice(-1));
-        if (candidates) {
-            for (const { shortcut, data } of candidates) {
-                if (text.endsWith(shortcut)) {
-                    event.preventDefault();
-                    event.stopImmediatePropagation();
-                    replaceText(target, shortcut, typeof data === 'string' ? data : data.text);
-                    return;
-                }
+    // Check for Trigger Symbol (Quick Search Popup)
+    if (triggerSymbol && text.endsWith(triggerSymbol)) {
+        hideGhost();
+        showShortcutPopup(target, triggerSymbol);
+        return;
+    }
+
+    // Try Standard Expansion
+    const candidates = shortcutsByLastChar.get(text.slice(-1));
+    if (candidates) {
+        for (const { shortcut, data } of candidates) {
+            if (text.endsWith(shortcut)) {
+                hideGhost();
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                replaceText(target, shortcut, typeof data === 'string' ? data : data.text, shortcut);
+                return;
             }
         }
+    }
+
+    // Try Ghost Text (only for textarea/input in this PoC)
+    if (enableGhostText && (tagName === 'TEXTAREA' || tagName === 'INPUT')) {
+        const lastWord = text.split(/\s/).pop();
+        const match = findTrieMatch(lastWord);
+        if (match) {
+            showGhost(target, match, lastWord);
+        } else {
+            hideGhost();
+        }
+    } else {
+        hideGhost();
+    }
+}, true);
+
+window.addEventListener('keydown', (e) => {
+    if (enableGhostText && e.key === 'Tab' && ghostState.activeMatch && ghostState.targetElement) {
+        const target = ghostState.targetElement;
+        const match = ghostState.activeMatch;
+        const prefix = target.value.substring(0, target.selectionStart).split(/\s/).pop();
+        
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        
+        // 1. Complete the shortcut key in the field
+        const suffix = match.shortcut.substring(prefix.length);
+        const start = target.selectionStart;
+        const end = target.selectionEnd;
+        target.setRangeText(suffix, start, end, 'end');
+        
+        // 2. Trigger the actual expansion
+        const fullShortcut = match.shortcut;
+        hideGhost();
+        replaceText(target, fullShortcut, match.text, fullShortcut);
+    } else if (e.key === 'Escape') {
+        hideGhost();
     }
 }, true);
 
@@ -207,6 +390,168 @@ async function resolveVariable(varName) {
     };
     
     return fallbacks[varName] !== undefined ? fallbacks[varName] : `{{${varName}}}`;
+}
+
+function showShortcutPopup(activeEl, trigger) {
+    if (document.getElementById('sn-shortcut-popup')) return;
+
+    const rect = activeEl.getBoundingClientRect();
+    const popup = document.createElement('div');
+    popup.id = 'sn-shortcut-popup';
+    
+    chrome.storage.local.get(['theme'], (res) => {
+        const isDark = res.theme === 'dark';
+        popup.style.cssText = `
+            position: fixed;
+            top: ${Math.max(10, rect.top + 25)}px;
+            left: ${rect.left}px;
+            width: 350px;
+            background: ${isDark ? '#1e1e1e' : '#fff'};
+            color: ${isDark ? '#e0e0e0' : '#333'};
+            border: 2px solid #278efc;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            z-index: 2147483647;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        `;
+
+        popup.innerHTML = `
+            <input type="text" id="sn-popup-search" placeholder="Search templates..." style="width: 100%; padding: 8px; border: 1px solid ${isDark ? '#444' : '#ccc'}; border-radius: 4px; background: ${isDark ? '#2c2c2c' : '#fff'}; color: ${isDark ? '#fff' : '#000'}; outline: none; box-sizing: border-box;">
+            <div id="sn-popup-list" style="max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;"></div>
+        `;
+
+        document.body.appendChild(popup);
+        const searchInput = popup.querySelector('#sn-popup-search');
+        const listContainer = popup.querySelector('#sn-popup-list');
+        searchInput.focus();
+
+        let selectedIndex = 0;
+        let filteredKeys = [];
+
+        const renderList = () => {
+            const query = searchInput.value.toLowerCase();
+            const allKeys = Object.keys(SHORTCUTS);
+            
+            filteredKeys = allKeys.filter(key => {
+                const item = SHORTCUTS[key];
+                const matchesKey = key.toLowerCase().includes(query);
+                const matchesText = (typeof item === 'string' ? item : item.text).toLowerCase().includes(query);
+                const matchesTag = item.tags && item.tags.some(t => t.toLowerCase().includes(query));
+                return matchesKey || matchesText || matchesTag;
+            });
+
+            // Sort by usageCount descending
+            filteredKeys.sort((a, b) => {
+                const countA = SHORTCUTS[a].usageCount || 0;
+                const countB = SHORTCUTS[b].usageCount || 0;
+                if (countB !== countA) return countB - countA;
+                return a.localeCompare(b);
+            });
+
+            if (selectedIndex >= filteredKeys.length) selectedIndex = Math.max(0, filteredKeys.length - 1);
+
+            listContainer.innerHTML = '';
+            filteredKeys.forEach((key, idx) => {
+                const item = SHORTCUTS[key];
+                const isSelected = idx === selectedIndex;
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'sn-popup-item';
+                itemDiv.dataset.idx = idx;
+                itemDiv.style.cssText = `
+                    padding: 8px;
+                    border-radius: 4px;
+                    background: ${isSelected ? (isDark ? '#333' : '#eef6ff') : 'transparent'};
+                    border: 1px solid ${isSelected ? '#278efc' : (isDark ? '#333' : '#eee')};
+                    cursor: pointer;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 2px;
+                    transition: background 0.1s;
+                `;
+                
+                const preview = (typeof item === 'string' ? item : item.text).replace(/\n/g, ' ↵ ').substring(0, 60);
+                itemDiv.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; pointer-events: none;">
+                        <b style="color: ${isDark ? '#ffb74d' : '#e67e22'}; font-size: 13px;">${key}</b>
+                        <span style="font-size: 10px; color: ${isDark ? '#aaa' : '#999'};">Used: ${item.usageCount || 0}</span>
+                    </div>
+                    <div style="font-size: 11px; color: ${isDark ? '#aaa' : '#666'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;">${preview}</div>
+                `;
+
+                // Use mousedown to trigger before the popup "click outside" logic can potentially interfere
+                itemDiv.onmousedown = (e) => {
+                    e.preventDefault(); // Keep focus on search input or activeEl
+                    e.stopPropagation();
+                    selectItem(key);
+                };
+
+                itemDiv.onmouseenter = () => {
+                    selectedIndex = idx;
+                    // Visual update only to avoid full re-render loop
+                    popup.querySelectorAll('.sn-popup-item').forEach((el, i) => {
+                        const sel = i === selectedIndex;
+                        el.style.background = sel ? (isDark ? '#333' : '#eef6ff') : 'transparent';
+                        el.style.borderColor = sel ? '#278efc' : (isDark ? '#333' : '#eee');
+                    });
+                };
+                listContainer.appendChild(itemDiv);
+                if (isSelected) itemDiv.scrollIntoView({ block: 'nearest' });
+            });
+
+            if (filteredKeys.length === 0) {
+                listContainer.innerHTML = `<div style="text-align: center; padding: 20px; color: #999; font-size: 12px;">No matches found</div>`;
+            }
+        };
+
+        const selectItem = (key) => {
+            const data = SHORTCUTS[key];
+            cleanup();
+            replaceText(activeEl, trigger, typeof data === 'string' ? data : data.text, key);
+        };
+
+        const cleanup = () => {
+            popup.remove();
+            activeEl.focus();
+        };
+
+        searchInput.oninput = () => {
+            selectedIndex = 0;
+            renderList();
+        };
+
+        searchInput.onkeydown = (e) => {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                selectedIndex = (selectedIndex + 1) % filteredKeys.length;
+                renderList();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                selectedIndex = (selectedIndex - 1 + filteredKeys.length) % filteredKeys.length;
+                renderList();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (filteredKeys[selectedIndex]) selectItem(filteredKeys[selectedIndex]);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cleanup();
+            }
+        };
+
+        // Click outside to cancel
+        const clickHandler = (e) => {
+            if (!popup.contains(e.target)) {
+                document.removeEventListener('mousedown', clickHandler);
+                cleanup();
+            }
+        };
+        setTimeout(() => document.addEventListener('mousedown', clickHandler), 10);
+
+        renderList();
+    });
 }
 
 function showSelection(options) {
@@ -366,7 +711,7 @@ function showPrompt(label) {
     });
 }
 
-async function replaceText(element, shortcut, replacement) {
+async function replaceText(element, shortcut, replacement, shortcutKey = null) {
     // Variable Resolution
     const varRegex = /\{\{(.*?)\}\}/g;
     let resolvedText = replacement;
@@ -386,11 +731,23 @@ async function replaceText(element, shortcut, replacement) {
 
     // Stats Update
     const saved = clean.length - shortcut.length;
-    chrome.storage.local.get(['stats'], (res) => {
+    chrome.storage.local.get(['stats', 'shortcuts'], (res) => {
+        // Global stats
         const stats = res.stats || { usageCount: 0, charsSaved: 0 };
         stats.usageCount++;
         if (saved > 0) stats.charsSaved += saved;
-        chrome.storage.local.set({ stats });
+        
+        // Per-shortcut stats
+        const shortcuts = res.shortcuts || {};
+        if (shortcutKey && shortcuts[shortcutKey]) {
+            if (typeof shortcuts[shortcutKey] === 'string') {
+                shortcuts[shortcutKey] = { text: shortcuts[shortcutKey], tags: [], usageCount: 1 };
+            } else {
+                shortcuts[shortcutKey].usageCount = (shortcuts[shortcutKey].usageCount || 0) + 1;
+            }
+        }
+        
+        chrome.storage.local.set({ stats, shortcuts });
     });
 
     if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
