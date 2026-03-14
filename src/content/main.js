@@ -376,6 +376,15 @@ window.addEventListener('input', (event) => {
 
     // Try Ghost Text
     if (settings.enableGhostText && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT')) {
+        const start = target.selectionStart || 0;
+        const textAfter = target.value.substring(start);
+        
+        // Reliability: Only show if cursor is at the end of the text OR followed only by whitespace/newlines
+        if (/[^\s]/.test(textAfter)) {
+            ghost.hide();
+            return;
+        }
+
         const lastWord = text.split(/\s/).pop();
         const gMatch = engine.findTrieMatch(lastWord);
         if (gMatch) ghost.show(target, gMatch, lastWord);
@@ -394,6 +403,10 @@ window.addEventListener('keydown', (e) => {
         ghost.hide();
         replaceText(target, match.shortcut, match.text, match.shortcut, { showPrompt, showSelection, updateStats });
     } else if (e.key === 'Escape') ghost.hide();
+}, true);
+
+window.addEventListener('blur', (e) => {
+    ghost.hide();
 }, true);
 
 document.addEventListener('paste', (event) => {

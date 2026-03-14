@@ -1,7 +1,7 @@
 // src/options/main.js
 import { getShortcuts, getSettings, saveSetting, onStorageChange } from '../shared/storage.js';
 import { renderStats, renderFilterTags, renderGrid, renderTagsInput } from './ui-render.js';
-import { extractAllTags, addBulkTag, removeShortcut, saveShortcut } from './shortcuts.js';
+import { extractAllTags, addBulkTag, removeShortcut, saveShortcut, findConflicts } from './shortcuts.js';
 import { exportToJSON, importFromJSON } from './import-export.js';
 
 let allData = {};
@@ -195,6 +195,12 @@ async function handleSave() {
     const key = shortcutInput.value.trim();
     const text = replacementInput.value;
     if (!key || !text) return alert("Shortcut and content are required!");
+
+    const conflicts = findConflicts(key, allData, editingOriginalKey);
+    if (conflicts.length > 0) {
+        const msg = `Conflict detected:\n${conflicts.join('\n')}\n\nThis can cause issues with Ghost Text. Save anyway?`;
+        if (!confirm(msg)) return;
+    }
 
     const item = { text, tags: [...currentTags], usageCount: editingOriginalKey ? (allData[editingOriginalKey]?.usageCount || 0) : 0 };
     await saveShortcut(key, item, editingOriginalKey);

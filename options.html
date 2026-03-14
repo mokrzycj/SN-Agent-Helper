@@ -166,6 +166,64 @@
     .theme-toggle { background: none; border: none; font-size: 14px; cursor: pointer; color: var(--text-muted); transition: color 0.2s; }
     .theme-toggle:hover { color: var(--text-main); }
     .text-link { background: none; border: none; color: var(--link-color); cursor: pointer; text-decoration: underline; font-size: 13px; }
+
+    /* --- Switch Styles --- */
+    .switch-group {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+    .switch-label {
+      font-weight: bold;
+      font-size: 12px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      margin-bottom: 0 !important;
+      cursor: pointer;
+    }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 40px;
+      height: 20px;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: var(--btn-sec-hover);
+      transition: .4s;
+      border-radius: 20px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 14px;
+      width: 14px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background-color: var(--btn-primary);
+    }
+    input:focus + .slider {
+      box-shadow: 0 0 1px var(--btn-primary);
+    }
+    input:checked + .slider:before {
+      transform: translateX(20px);
+    }
   </style>
 </head>
 <body>
@@ -227,19 +285,25 @@
     <!-- Settings Section -->
     <div class="input-group" style="margin-top: 20px; border-top: 1px solid var(--border-light); padding-top: 20px;">
       <div style="display: flex; flex-direction: column; gap: 15px;">
-        <div>
-          <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; text-transform: none;">
-            <input type="checkbox" id="enable-sn-paste" checked> Enable SN Image Paste
+        <div class="switch-group">
+          <label for="enable-sn-paste" class="switch-label">Enable SN Image Paste</label>
+          <label class="switch">
+            <input type="checkbox" id="enable-sn-paste" checked>
+            <span class="slider"></span>
           </label>
         </div>
-        <div>
-          <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; text-transform: none;">
-            <input type="checkbox" id="enable-sn-links" checked> Enable SN Link Highlighter
+        <div class="switch-group">
+          <label for="enable-sn-links" class="switch-label">Enable SN Link Highlighter</label>
+          <label class="switch">
+            <input type="checkbox" id="enable-sn-links" checked>
+            <span class="slider"></span>
           </label>
         </div>
-        <div>
-          <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; text-transform: none;">
-            <input type="checkbox" id="enable-ghost-text" checked> Enable Ghost Text Completion
+        <div class="switch-group">
+          <label for="enable-ghost-text" class="switch-label">Enable Ghost Text Completion</label>
+          <label class="switch">
+            <input type="checkbox" id="enable-ghost-text" checked>
+            <span class="slider"></span>
           </label>
         </div>
         <div>

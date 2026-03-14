@@ -47,3 +47,17 @@ export async function saveShortcut(key, item, editingOriginalKey) {
     shortcuts[key] = item;
     await saveShortcuts(shortcuts);
 }
+
+export function findConflicts(key, allData, editingOriginalKey) {
+    const conflicts = [];
+    for (const existingKey of Object.keys(allData)) {
+        if (existingKey === editingOriginalKey) continue;
+        
+        if (existingKey.startsWith(key) && existingKey !== key) {
+            conflicts.push(`"${key}" is a prefix of existing shortcut "${existingKey}"`);
+        } else if (key.startsWith(existingKey) && existingKey !== key) {
+            conflicts.push(`Existing shortcut "${existingKey}" is a prefix of "${key}"`);
+        }
+    }
+    return conflicts;
+}
